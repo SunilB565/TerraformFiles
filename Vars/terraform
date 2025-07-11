@@ -1,0 +1,397 @@
+To create Multiple Bucket without deleting the existing
+resource "aws_s3_bucket" "buckets" {
+  for_each = toset(var.s3_bucket_names)
+
+  bucket = each.value
+  acl    = "private"
+
+  tags = {
+    Name        = each.value
+    Environment = "dev"
+  }
+}
+
+variable "s3_bucket_names" {
+  type        = list(string)
+  description = "List of S3 bucket names to create"
+}
+
+
+terraform apply -var='s3_bucket_names=["bucket-001","bucket-002","bucket-003"]'
+
+
+Terraform.tfvars
+s3_bucket_names = [
+  "sunil-dev-bucket",
+  "sunil-staging-bucket",
+  "sunil-prod-bucket"
+]
+
+
+
+Count 
+
+resource "aws_s3_bucket" "example" {
+  count  = length(var.s3_bucket_names)
+
+  bucket = var.s3_bucket_names[count.index]
+  acl    = "private"
+
+  tags = {
+    Name        = var.s3_bucket_names[count.index]
+    Environment = "dev"
+  }
+}
+
+
+If you're creating S3 buckets with meaningful names:
+
+for_each is safer because it keys resources by name.
+
+count can accidentally destroy/recreate buckets if the list is reordered.
+
+
+Count example of ec2
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "example" {
+  count         = 3
+  ami           = "ami-0c02fb55956c7d316" # Amazon Linux 2 (update for your region)
+  instance_type = "t2.micro"
+
+  tags = {
+    Name = "example-instance-${count.index + 1}"
+  }
+}
+
+
+Saving tf in remote 
+terraform {
+  backend "s3" {
+    bucket         = "my-terraform-state-bucket"
+    key            = "env/dev/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+Terraform Modules
+
+terraform-modules/
+├── main.tf
+├── variables.tf
+├── terraform.tfvars
+└── modules/
+    └── s3_bucket/
+        ├── main.tf
+        ├── variables.tf
+        └── outputs.tf
+
+
+modules/s3_bucket/variables.tf
+
+variable "bucket_name" {
+  type        = string
+  description = "Name of the S3 bucket"
+}
+🔹 modules/s3_bucket/main.tf
+resource "aws_s3_bucket" "this" {
+  bucket = var.bucket_name
+  acl    = "private"
+}
+🔹 modules/s3_bucket/outputs.tf
+
+output "bucket_id" {
+  value = aws_s3_bucket.this.id
+}
+🔹 main.tf (Root module)
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+module "my_bucket" {
+  source      = "./modules/s3_bucket"
+  bucket_name = var.bucket_name
+}
+🔹 variables.tf
+variable "bucket_name" {
+  type = string
+}
+🔹 terraform.tfvars
+bucket_name = "my-first-modular-bucket-1234"
+
+
+
+
+
+
+📁 Directory Structure
+css
+Copy
+Edit
+terraform/
+├── main.tf
+├── variables.tf
+├── terraform.tfvars
+└── modules/
+    ├── kms_key/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    └── s3_bucket/
+        ├── main.tf
+        ├── variables.tf
+        └── outputs.tf
+🔐 1. Module: modules/kms_key
+variables.tf
+hcl
+Copy
+Edit
+variable "alias_name" {
+  type        = string
+  description = "Alias name for the KMS key"
+}
+main.tf
+hcl
+Copy
+Edit
+resource "aws_kms_key" "this" {
+  description             = "Customer managed key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_alias" "this" {
+  name          = "alias/${var.alias_name}"
+  target_key_id = aws_kms_key.this.key_id
+}
+outputs.tf
+hcl
+Copy
+Edit
+output "kms_key_arn" {
+  value = aws_kms_key.this.arn
+}
+🪣 2. Module: modules/s3_bucket
+variables.tf
+hcl
+Copy
+Edit
+variable "bucket_name" {
+  type = string
+}
+
+variable "kms_key_arn" {
+  type        = string
+  description = "KMS key ARN to encrypt the S3 bucket"
+}
+main.tf
+hcl
+Copy
+Edit
+resource "aws_s3_bucket" "this" {
+  bucket = var.bucket_name
+  acl    = "private"
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
+  bucket = aws_s3_bucket.this.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.kms_key_arn
+    }
+  }
+}
+outputs.tf
+h
+Copy
+Edit
+output "bucket_id" {
+  value = aws_s3_bucket.this.id
+}
+🌍 Root Configuration
+variables.tf
+hcl
+Copy
+Edit
+variable "bucket_name" {
+  type = string
+}
+
+variable "kms_alias" {
+  type = string
+}
+terraform.tfvars
+hcl
+Copy
+Edit
+bucket_name = "modular-s3-bucket-123"
+kms_alias   = "my-shared-kms-key"
+main.tf
+h
+Copy
+Edit
+provider "aws" {
+  region = "us-east-1"
+}
+
+module "kms_key" {
+  source     = "./modules/kms_key"
+  alias_name = var.kms_alias
+}
+
+module "s3_bucket" {
+  source       = "./modules/s3_bucket"
+  bucket_name  = var.bucket_name
+  kms_key_arn  = module.kms_key.kms_key_arn
+}
+
+
+
+Final Directory Structure
+css
+Copy
+Edit
+terraform/
+├── envs/
+│   ├── dev/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── terraform.tfvars
+│   └── prod/
+│       ├── main.tf
+│       ├── variables.tf
+│       └── terraform.tfvars
+├── modules/
+│   ├── kms_key/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── s3_bucket/
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
+🔁 1. Shared Modules
+(already defined as in the previous message, no changes needed here)
+
+🧪 2. envs/dev/terraform.tfvars
+hcl
+Copy
+Edit
+bucket_name = "my-dev-s3-bucket-123"
+kms_alias   = "dev-kms-key"
+🧪 3. envs/prod/terraform.tfvars
+h
+Copy
+Edit
+bucket_name = "my-prod-s3-bucket-123"
+kms_alias   = "prod-kms-key"
+🔧 4. envs/dev/variables.tf and envs/prod/variables.tf
+(same in both)
+
+hcl
+Copy
+Edit
+variable "bucket_name" {
+  type = string
+}
+
+variable "kms_alias" {
+  type = string
+}
+🧩 5. envs/dev/main.tf and envs/prod/main.tf
+(same structure, different paths)
+
+hcl
+Copy
+Edit
+provider "aws" {
+  region = "us-east-1"
+}
+
+module "kms_key" {
+  source     = "../../modules/kms_key"
+  alias_name = var.kms_alias
+}
+
+module "s3_bucket" {
+  source       = "../../modules/s3_bucket"
+  bucket_name  = var.bucket_name
+  kms_key_arn  = module.kms_key.kms_key_arn
+}
+▶️ How to Deploy Each Environment
+bash
+Copy
+Edit
+# Deploy dev
+cd terraform/envs/dev
+terraform init
+terraform apply
+
+# Deploy prod
+cd terraform/envs/prod
+terraform init
+terraform apply
+
+
+
+
+terraform/
+├── envs/
+│   ├── dev/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── terraform.tfvars
+│   │   └── backend.tf          ◀️ new
+│   └── prod/
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── terraform.tfvars
+│       └── backend.tf          ◀️ new
+🔐 envs/dev/backend.tf
+hcl
+Copy
+Edit
+terraform {
+  backend "s3" {
+    bucket         = "tf-backend-bucket-123"
+    key            = "envs/dev/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-lock-table"
+    encrypt        = true
+  }
+}
+🔐 envs/prod/backend.tf
+hcl
+Copy
+Edit
+terraform {
+  backend "s3" {
+    bucket         = "tf-backend-bucket-123"
+    key            = "envs/prod/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-lock-table"
+    encrypt        = true
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
