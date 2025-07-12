@@ -3,7 +3,7 @@ provider "aws" {
 }
 
 data "aws_s3_bucket" "existing" {
-  bucket = "existing-bucket-name-123"
+  bucket = "zptfstate001"
 }
 
 output "existing_bucket_arn" {

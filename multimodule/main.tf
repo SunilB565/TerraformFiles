@@ -3,11 +3,12 @@ provider "aws" {
 }
 
 module "kms_key" {
-  source     = "../../modules/kms_key"
+  source     = "./modules/kms_key"
   alias_name = var.kms_alias
 }
 
 module "s3_bucket" {
-  source       = "../../modules/s3_bucket"
+  source       = "./modules/s3_bucket"
   bucket_name  = var.bucket_name
 }
+
